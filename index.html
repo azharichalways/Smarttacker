@@ -410,7 +410,9 @@
     let transactions = [];   // pemasukan & pengeluaran REAL
     let rotations = [];      // perputaran dana (bukan pemasukan/pengeluaran)
     let userStats = { xp: 0, streak: 1, monthlyBudget: DEFAULT_BUDGET };
-    let isSaving = false;
+    const pending = new Map();   // id -> {kind, item} : catatan yang masih dikirim ke server
+    let saveQueue = Promise.resolve();   // antrean kirim, urut sesuai input
+    const CACHE_KEY = 'azharich_cache_v1';
     let listFilter = 'all';
     let listLimit = PAGE_SIZE;
     let convertTargetId = null;
@@ -466,20 +468,44 @@
       setType('Pengeluaran');
       updateGamificationDisplay();
       if (IS_DEMO) $('demoBanner').classList.remove('hidden');
+      if (!IS_DEMO && loadCache()) updateAll(); // tampilkan data terakhir langsung, segarkan di latar belakang
       loadData();
     });
 
+    function saveCache() {
+      if (IS_DEMO) return;
+      try { localStorage.setItem(CACHE_KEY, JSON.stringify({ userStats: userStats, transactions: transactions, rotations: rotations })); } catch (e) {}
+    }
+    function loadCache() {
+      try {
+        const c = JSON.parse(localStorage.getItem(CACHE_KEY) || 'null');
+        if (!c) return false;
+        userStats = Object.assign(userStats, c.userStats || {});
+        transactions = c.transactions || [];
+        rotations = c.rotations || [];
+        return true;
+      } catch (e) { return false; }
+    }
+
     async function loadData() {
       if (IS_DEMO) { loadMockData(); return; }
-      $('transactionList').innerHTML = '<div class="bg-white rounded-2xl p-6 text-center text-xs text-slate-500 border border-slate-200">Memuat data...</div>';
+      const hadCache = transactions.length > 0 || rotations.length > 0;
+      if (!hadCache) $('transactionList').innerHTML = '<div class="bg-white rounded-2xl p-6 text-center text-xs text-slate-500 border border-slate-200">Memuat data...</div>';
       try {
         const res = await api('getInitialData');
         if (!res || res.status !== 'success') throw new Error((res && res.message) || 'Gagal memuat data');
         userStats = Object.assign({ xp: 0, streak: 1, monthlyBudget: DEFAULT_BUDGET }, res.userStats || {});
         transactions = res.transactions || [];
         rotations = res.rotations || [];
+        // catatan yang masih dikirim jangan hilang dari layar
+        pending.forEach((p, id) => {
+          const arr = p.kind === 'rot' ? rotations : transactions;
+          if (!arr.some(x => x.id === id)) arr.unshift(p.item);
+        });
+        saveCache();
         updateAll();
       } catch (e) {
+        if (hadCache) { showToast('Gagal menyegarkan data, menampilkan data tersimpan', '⚠️'); return; }
         $('transactionList').innerHTML = `
           <div class="bg-white rounded-2xl p-6 text-center border border-rose-200">
             <p class="text-sm font-bold text-rose-700">Data belum bisa dimuat</p>
@@ -614,7 +640,6 @@
     function resetNominal() { $('txNominal').value = ''; }
 
     function updateSaveButton() {
-      if (isSaving) return;
       let txt;
       if (currentType === 'Perputaran') txt = 'Simpan Perputaran (tanpa XP)';
       else if (currentType === 'Pemasukan') txt = 'Simpan Pemasukan (+10 XP)';
@@ -622,13 +647,8 @@
         const k = document.querySelector('input[name="klasifikasi"]:checked');
         txt = `Simpan Pengeluaran (+${k && k.value === 'Boros' ? 15 : 30} XP)`;
       }
+      if (pending.size > 0) txt += ` ⏳${pending.size}`;
       $('btnSaveText').innerText = txt;
-    }
-    function setSaveButtonState(state) {
-      const btn = $('btnSaveTx');
-      btn.disabled = state === 'saving';
-      if (state === 'saving') $('btnSaveText').innerText = 'Menyimpan...';
-      else updateSaveButton();
     }
 
     function resetForm() {
@@ -641,9 +661,8 @@
       $('rotPihak').value = s.pihak; $('txTanggal').value = s.tanggal;
     }
 
-    /* ===================== SIMPAN ===================== */
-    async function submitTransaction() {
-      if (isSaving) return;
+    /* ===================== SIMPAN (tidak memblokir input berikutnya) ===================== */
+    function submitTransaction() {
       const nominal = parseInt($('txNominal').value, 10);
       if (!(nominal > 0)) return showToast('Isi nominal lebih dari 0', '⚠️');
 
@@ -667,51 +686,58 @@
         kind = 'real'; action = 'addTransaction';
       }
 
-      isSaving = true;
-      setSaveButtonState('saving');
-      const arr = kind === 'rot' ? rotations : transactions;
-      arr.unshift(item);
+      // Tampilkan langsung, form langsung siap untuk catatan berikutnya
+      (kind === 'rot' ? rotations : transactions).unshift(item);
       resetForm();
+
+      if (IS_DEMO) { updateAll(); finishSave(kind, item, { status: 'success', earnedXp: kind === 'real' ? estimateXp(item) : 0 }); return; }
+
+      pending.set(item.id, { kind: kind, item: item });
       updateAll();
+      updateSaveButton();
+      // Kirim berurutan agar XP & streak dari server selalu runtut
+      saveQueue = saveQueue.then(() => sendItem(kind, action, item, snapshot));
+    }
 
-      if (IS_DEMO) { finishSave(kind, item, { status: 'success', earnedXp: kind === 'real' ? estimateXp(item) : 0 }); return; }
-
+    async function sendItem(kind, action, item, snapshot) {
       try {
         const res = await api(action, item);
         if (!res || res.status !== 'success') throw new Error((res && res.message) || 'Gagal menyimpan');
+        pending.delete(item.id);
         finishSave(kind, item, res);
       } catch (e) {
+        pending.delete(item.id);
+        const arr = kind === 'rot' ? rotations : transactions;
         const i = arr.findIndex(x => x.id === item.id);
         if (i >= 0) arr.splice(i, 1);
-        isSaving = false;
-        setSaveButtonState('idle');
-        restoreForm(snapshot);
+        // kembalikan isi formulir hanya jika formulir sedang kosong (tidak menimpa ketikan berikutnya)
+        if (!$('smartInput').value && !$('txNominal').value && !$('txCatatan').value) restoreForm(snapshot);
         updateAll();
-        failToast(e, 'Gagal menyimpan, isi formulir dikembalikan');
+        updateSaveButton();
+        failToast(e, `Gagal menyimpan "${item.catatan}" (${formatRupiah(item.nominal)})`);
       }
     }
 
     function finishSave(kind, item, res) {
-      isSaving = false;
       if (typeof res.newXp === 'number') userStats.xp = res.newXp;
       else if (IS_DEMO && res.earnedXp) userStats.xp = (userStats.xp || 0) + res.earnedXp;
       if (typeof res.newStreak === 'number') userStats.streak = res.newStreak;
+      saveCache();
       updateGamificationDisplay();
       updateBudgetBanner();
+      renderTransactionList();
+      updateSaveButton();
 
-      const btn = $('btnSaveTx');
       if (kind === 'real' && !res.duplicate) {
         const xp = res.earnedXp || 0;
         try { confetti({ particleCount: 50, spread: 70, origin: { y: 0.8 }, colors: ['#6366f1', '#a855f7', '#f59e0b', '#10b981', '#ec4899'] }); } catch (e) {}
-        btn.classList.add('btn-celebrate');
-        $('btnSaveText').innerText = `Tersimpan! (+${xp} XP)`;
-        showToast(`Catatan tersimpan, +${xp} XP`, '🌟');
+        const btn = $('btnSaveTx');
+        btn.classList.remove('btn-celebrate'); void btn.offsetWidth; btn.classList.add('btn-celebrate');
+        setTimeout(() => btn.classList.remove('btn-celebrate'), 600);
+        showToast(`Tersimpan, +${xp} XP`, '🌟');
       } else {
-        $('btnSaveText').innerText = 'Tersimpan!';
-        showToast('Perputaran tersimpan (tidak masuk rekap real)', '🔄');
+        showToast(kind === 'rot' ? 'Perputaran tersimpan (tidak masuk rekap real)' : 'Sudah tersimpan', '🔄');
       }
-      btn.disabled = false;
-      setTimeout(() => { btn.classList.remove('btn-celebrate'); updateSaveButton(); }, 1500);
     }
 
     /* ===================== HAPUS & PINDAH ===================== */
@@ -1043,7 +1069,7 @@
             <div class="flex items-center gap-3 min-w-0">
               <div class="w-9 h-9 rounded-xl flex items-center justify-center text-sm bg-sky-50 text-sky-600 flex-shrink-0"><i class="fa-solid fa-rotate"></i></div>
               <div class="min-w-0">
-                <p class="text-xs sm:text-sm font-bold text-slate-900 truncate">${escapeHtml(t.catatan)}</p>
+                <p class="text-xs sm:text-sm font-bold text-slate-900 truncate">${escapeHtml(t.catatan)}${pending.has(t.id) ? ' ⏳' : ''}</p>
                 <span class="text-[10px] text-slate-400">${escapeHtml(t.tanggal)} ${escapeHtml(t.waktu)} • Perputaran ${escapeHtml(t.arah)} • ${escapeHtml(t.jenis)}${t.pihak ? ' • ' + escapeHtml(t.pihak) : ''}</span>
               </div>
             </div>
@@ -1060,7 +1086,7 @@
             <div class="flex items-center gap-3 min-w-0">
               <div class="w-9 h-9 rounded-xl flex items-center justify-center text-sm flex-shrink-0 ${isExp ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600'}"><i class="fa-solid ${isExp ? 'fa-arrow-down' : 'fa-arrow-up'}"></i></div>
               <div class="min-w-0">
-                <p class="text-xs sm:text-sm font-bold text-slate-900 truncate">${escapeHtml(t.catatan)}</p>
+                <p class="text-xs sm:text-sm font-bold text-slate-900 truncate">${escapeHtml(t.catatan)}${pending.has(t.id) ? ' ⏳' : ''}</p>
                 <span class="text-[10px] text-slate-400">${escapeHtml(t.tanggal)} ${escapeHtml(t.waktu)} • ${escapeHtml(t.kategori)}${klas}</span>
               </div>
             </div>
