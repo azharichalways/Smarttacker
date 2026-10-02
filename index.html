@@ -457,12 +457,13 @@
     function getPin() { return storeGet(PIN_KEY) || ''; }
 
     function showPin(message) {
-      const ov = $('pinOverlay');
-      ov.classList.remove('hidden'); ov.classList.add('flex');
-      const err = $('pinError');
-      if (message) { err.innerText = message; err.classList.remove('hidden'); } else { err.classList.add('hidden'); }
-      setTimeout(() => $('pinInput').focus(), 50);
-    }
+  // Paksa overlay PIN selalu tersembunyi
+  const ov = $('pinOverlay');
+  if (ov) {
+    ov.classList.add('hidden');
+    ov.classList.remove('flex');
+  }
+}
     function hidePin() {
       const ov = $('pinOverlay');
       ov.classList.add('hidden'); ov.classList.remove('flex');
@@ -522,7 +523,7 @@
       updateGamificationDisplay();
       if (IS_DEMO) $('demoBanner').classList.remove('hidden');
 
-      if (IS_DEMO || getPin()) loadData(); else showPin();
+      loadData(); // Langsung muat data tanpa cek PIN
     });
 
     async function loadData() {
