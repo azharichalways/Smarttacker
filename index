@@ -355,7 +355,7 @@
      * KONFIGURASI  -  GANTI NILAI INI SETELAH DEPLOY GOOGLE APPS SCRIPT
      * Isi dengan URL Web App yang berakhiran /exec
      * ===================================================================== */
-    const GAS_URL = "https://script.google.com/macros/s/AKfycbwE7QrHeE20K5rRoHcNQ1jz6bzdB6LSt2taUCuRBoJaEx7qucp5tUkUuG_ksc5kR2mV/exec";
+    const GAS_URL = "https://script.google.com/macros/s/AKfycbzZCuVvei0T_ukJJ6twvcOp-SHG4MOrrofPGHF3vsiWa7SkadCsS7eswKQyuRWzVAFM/exec";
 
     const IS_DEMO = !GAS_URL || GAS_URL.indexOf("PASTE_") === 0;
     const DEFAULT_BUDGET = 3000000;
