@@ -352,8 +352,7 @@
 
   <script>
     /* =====================================================================
-     * KONFIGURASI  -  GANTI NILAI INI SETELAH DEPLOY GOOGLE APPS SCRIPT
-     * Isi dengan URL Web App yang berakhiran /exec
+     * KONFIGURASI  -  URL WEB APP GOOGLE APPS SCRIPT
      * ===================================================================== */
     const GAS_URL = "https://script.google.com/macros/s/AKfycbzZCuVvei0T_ukJJ6twvcOp-SHG4MOrrofPGHF3vsiWa7SkadCsS7eswKQyuRWzVAFM/exec";
 
@@ -1166,8 +1165,7 @@
       reviewTargetMonth = getLocalMonthStr(prev);
       if (now.getDate() > 5 || storeGet('azharich_review_dismissed') === reviewTargetMonth) return;
       const name = prev.toLocaleString('id-ID', { month: 'long', year: 'numeric' });
-      $('monthlyReviewBanner').classList.remove('hidden');
-      $('monthlyReviewTitle').innerText = `Review Bulanan (${name}) Siap!`;
+      $('monthlyReviewBanner').classList.remove('hidden');$('monthlyReviewTitle').innerText = `Review Bulanan (${name}) Siap!`;
       $('monthlyReviewSub').innerText = `Saatnya audit pengeluaran ${name} untuk mencegah bocor alus bulan ini.`;
     }
     function openMonthlyReview() {
@@ -1193,8 +1191,7 @@
 
     let toastTimer = null;
     function showToast(msg, icon) {
-      const toast = $('toastNotification');
-      $('toastMessage').innerText = msg;
+      const toast = $('toastNotification');$('toastMessage').innerText = msg;
       $('toastIcon').innerText = icon || '⭐';
       toast.classList.remove('opacity-0', 'translate-y-4', 'pointer-events-none');
       toast.classList.add('opacity-100', 'translate-y-0');
