@@ -30,19 +30,6 @@
 </head>
 <body class="bg-slate-50 text-slate-800 antialiased min-h-screen pb-24 md:pb-12">
 
-  <!-- PIN OVERLAY -->
-  <div id="pinOverlay" class="hidden fixed inset-0 z-[60] bg-slate-900/80 backdrop-blur-sm items-center justify-center p-4">
-    <div class="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl space-y-3">
-      <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-500 text-white flex items-center justify-center text-xl"><i class="fa-solid fa-lock"></i></div>
-      <h2 class="text-lg font-extrabold text-slate-900">Masukkan PIN</h2>
-      <p class="text-xs text-slate-500">PIN sama dengan <b>APP_PIN</b> yang Anda atur di Script Properties Google Apps Script.</p>
-      <input type="password" id="pinInput" autocomplete="current-password" placeholder="PIN" class="w-full px-4 py-3 bg-slate-50 border-2 border-indigo-200 focus:border-indigo-600 rounded-xl outline-none font-semibold" onkeydown="if(event.key==='Enter') submitPin()">
-      <label class="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" id="pinRemember" checked> Ingat di perangkat ini</label>
-      <p id="pinError" class="hidden text-xs font-semibold text-rose-600"></p>
-      <button onclick="submitPin()" class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold rounded-xl transition">Masuk</button>
-    </div>
-  </div>
-
   <!-- MODAL PINDAHKAN KE PERPUTARAN -->
   <div id="convertModal" class="hidden fixed inset-0 z-50 bg-slate-900/60 items-end sm:items-center justify-center p-4">
     <div class="bg-white rounded-3xl p-5 w-full max-w-sm shadow-2xl space-y-3">
@@ -76,9 +63,6 @@
           <span class="text-xs">⭐</span>
           <span id="levelBadge" class="text-xs font-bold text-indigo-700">Lvl 1</span>
         </div>
-        <button id="btnLogout" onclick="logout()" title="Kunci aplikasi" class="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center transition">
-          <i class="fa-solid fa-lock text-xs"></i>
-        </button>
       </div>
     </div>
   </header>
@@ -352,14 +336,12 @@
 
   <script>
     /* =====================================================================
-     * KONFIGURASI  -  GANTI NILAI INI SETELAH DEPLOY GOOGLE APPS SCRIPT
-     * Isi dengan URL Web App yang berakhiran /exec
+     * KONFIGURASI  -  URL Web App Google Apps Script (berakhiran /exec)
      * ===================================================================== */
     const GAS_URL = "https://script.google.com/macros/s/AKfycbzZCuVvei0T_ukJJ6twvcOp-SHG4MOrrofPGHF3vsiWa7SkadCsS7eswKQyuRWzVAFM/exec";
 
     const IS_DEMO = !GAS_URL || GAS_URL.indexOf("PASTE_") === 0;
     const DEFAULT_BUDGET = 3000000;
-    const PIN_KEY = 'azharich_pin';
     const JENIS_PUTAR = ['Investasi (Bibit)', 'Deposit Downline', 'Deposit Pribadi', 'Lainnya'];
     const PAGE_SIZE = 100;
 
@@ -436,9 +418,8 @@
     const memStore = {};
 
     /* ===================== STORAGE AMAN ===================== */
-    function storeGet(k) { try { return localStorage.getItem(k) || sessionStorage.getItem(k) || memStore[k] || null; } catch (e) { return memStore[k] || null; } }
-    function storeSet(k, v, persist) { memStore[k] = v; try { (persist ? localStorage : sessionStorage).setItem(k, v); } catch (e) {} }
-    function storeDel(k) { delete memStore[k]; try { localStorage.removeItem(k); sessionStorage.removeItem(k); } catch (e) {} }
+    function storeGet(k) { try { return localStorage.getItem(k) || memStore[k] || null; } catch (e) { return memStore[k] || null; } }
+    function storeSet(k, v) { memStore[k] = v; try { localStorage.setItem(k, v); } catch (e) {} }
 
     /* ===================== HELPER UMUM ===================== */
     const $ = id => document.getElementById(id);
@@ -454,36 +435,6 @@
     function estimateXp(item) { return item.tipe === 'Pemasukan' ? 10 : (item.klasifikasi === 'Boros' ? 15 : 30); }
 
     /* ===================== API (GAS) ===================== */
-    function getPin() { return storeGet(PIN_KEY) || ''; }
-
-    function showPin(message) {
-  // Paksa overlay PIN selalu tersembunyi
-  const ov = $('pinOverlay');
-  if (ov) {
-    ov.classList.add('hidden');
-    ov.classList.remove('flex');
-  }
-}
-    function hidePin() {
-      const ov = $('pinOverlay');
-      ov.classList.add('hidden'); ov.classList.remove('flex');
-    }
-    function submitPin() {
-      const pin = $('pinInput').value.trim();
-      if (!pin) return;
-      storeSet(PIN_KEY, pin, $('pinRemember').checked);
-      $('pinInput').value = '';
-      hidePin();
-      loadData();
-    }
-    function logout() {
-      storeDel(PIN_KEY);
-      transactions = []; rotations = [];
-      updateAll();
-      if (IS_DEMO) return showToast('Mode demo: tidak ada PIN', 'ℹ️');
-      showPin();
-    }
-
     async function api(action, payload) {
       if (IS_DEMO) throw new Error('DEMO');
       const ctrl = new AbortController();
@@ -492,24 +443,17 @@
         const res = await fetch(GAS_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // text/plain agar tidak memicu preflight CORS
-          body: JSON.stringify({ action: action, pin: getPin(), payload: payload || {} }),
+          body: JSON.stringify({ action: action, payload: payload || {} }),
           signal: ctrl.signal,
           redirect: 'follow'
         });
-        const data = await res.json();
-        if (data && (data.code === 'BAD_PIN' || data.code === 'LOCKED' || data.code === 'NO_PIN')) {
-          storeDel(PIN_KEY);
-          showPin(data.message);
-          throw new Error('AUTH');
-        }
-        return data;
+        return await res.json();
       } finally {
         clearTimeout(timer);
       }
     }
 
     function failToast(e, text) {
-      if (e && e.message === 'AUTH') return;
       showToast(text + (e && e.name === 'AbortError' ? ' (waktu habis)' : ''), '⚠️');
     }
 
@@ -522,8 +466,7 @@
       setType('Pengeluaran');
       updateGamificationDisplay();
       if (IS_DEMO) $('demoBanner').classList.remove('hidden');
-
-      loadData(); // Langsung muat data tanpa cek PIN
+      loadData();
     });
 
     async function loadData() {
@@ -537,7 +480,6 @@
         rotations = res.rotations || [];
         updateAll();
       } catch (e) {
-        if (e.message === 'AUTH') return;
         $('transactionList').innerHTML = `
           <div class="bg-white rounded-2xl p-6 text-center border border-rose-200">
             <p class="text-sm font-bold text-rose-700">Data belum bisa dimuat</p>
@@ -1177,7 +1119,7 @@
       switchTab('tab-evaluasi');
     }
     function dismissMonthlyReview() {
-      storeSet('azharich_review_dismissed', reviewTargetMonth, true);
+      storeSet('azharich_review_dismissed', reviewTargetMonth);
       $('monthlyReviewBanner').classList.add('hidden');
     }
 
@@ -1186,7 +1128,7 @@
       const last = parseInt(storeGet('azharich_last_quote_index'), 10);
       let idx = Math.floor(Math.random() * QUOTES.length);
       if (!isNaN(last) && QUOTES.length > 1) { while (idx === last) idx = Math.floor(Math.random() * QUOTES.length); }
-      storeSet('azharich_last_quote_index', String(idx), true);
+      storeSet('azharich_last_quote_index', String(idx));
       $('quoteText').innerText = `"${QUOTES[idx].text}"`;
       $('quoteAuthor').innerText = `— ${QUOTES[idx].author}`;
     }
